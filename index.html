@@ -2,199 +2,231 @@
 <html lang="uz">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Optical Audio Receiver</title>
+<title>Optical Audio Receiver v2</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#07100b;color:#eaffea;font-family:Arial,sans-serif;text-align:center}
-main{max-width:900px;margin:auto;padding:16px}
-video{width:min(94vw,720px);background:#000;border:3px solid #244;border-radius:6px;display:block;margin:12px auto}
-.btns{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:10px 0}
-button{font-size:17px;padding:11px 22px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
-#btnStart{background:#1a7a3a;color:#fff}
-#btnStart:hover{background:#22a34e}
-#btnStop{background:#5a1a1a;color:#fff}
-#btnStop:hover{background:#8a2222}
-.info{padding:12px 16px;background:#102016;border-radius:10px;margin:10px auto;max-width:720px;font-size:15px;line-height:1.5}
-.warn{background:#1e1a08;border:1px solid #6b5a00;border-radius:8px;padding:10px;margin:10px auto;max-width:720px;font-size:14px;color:#e6d87a;display:none}
-#stats{font-size:13px;color:#7ab890;margin-top:6px}
+main{max-width:960px;margin:auto;padding:12px}
+h1{font-size:21px;margin-bottom:10px}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:8px 0}
+canvas{background:#000;border:2px solid #244;border-radius:5px}
+#cvLive{width:min(46vw,400px);aspect-ratio:4/3}
+#cvDebug{width:min(46vw,400px);aspect-ratio:4/3}
+.btns{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+button{font-size:15px;padding:9px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
+#btnStart{background:#1a7a3a;color:#fff}#btnStart:hover{background:#22a34e}
+#btnStop{background:#5a1a1a;color:#fff}#btnStop:hover{background:#8a2222}
+.info{padding:10px 14px;background:#102016;border-radius:9px;margin:8px auto;max-width:800px;font-size:14px;line-height:1.5}
+.warn{background:#1e1a08;border:1px solid #6b5a00;border-radius:8px;padding:9px;margin:8px auto;max-width:800px;font-size:13px;color:#e6d87a;display:none}
+#stats{font-size:12px;color:#7ab890;margin-top:4px;font-family:monospace}
+.labels{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:2px}
+.lbl{font-size:12px;color:#5a8a6a}
 </style>
 </head>
 <body>
 <main>
-  <h1>📷 Optical Audio Receiver</h1>
-  <div class="warn" id="httpsWarn">
-    ⚠️ Kamera faqat <b>HTTPS</b> yoki <b>localhost</b> da ishlaydi. Iltimos, xavfsiz ulanishdan foydalaning.
-  </div>
+  <h1>📷 Optical Audio Receiver v2</h1>
+  <div class="warn" id="httpsWarn">⚠️ Kamera faqat <b>HTTPS</b> yoki <b>localhost</b> da ishlaydi.</div>
   <div class="btns">
-    <button id="btnStart">▶ Kamera + Ijro</button>
+    <button id="btnStart">▶ Boshlash</button>
     <button id="btnStop">⏹ To'xtatish</button>
   </div>
-  <div class="info" id="status">Kamerani transmitter ekraniga qarating.</div>
+  <div class="info" id="status">Transmitter ekraniga kamerani qarating.</div>
   <div id="stats"></div>
-  <video id="video" autoplay muted playsinline></video>
-  <canvas id="cv" width="320" height="240" hidden></canvas>
+  <div class="row">
+    <div>
+      <canvas id="cvLive" width="400" height="300"></canvas>
+      <div class="lbl">Kamera oqimi</div>
+    </div>
+    <div>
+      <canvas id="cvDebug" width="400" height="300"></canvas>
+      <div class="lbl">Grid decode (yashil=1, qizil=0, ko'k=chegara)</div>
+    </div>
+  </div>
+  <video id="video" autoplay muted playsinline hidden></video>
 </main>
 <script>
 const W=40, H=32, BYTES=256, PAYLOAD=251;
-const video = document.getElementById('video');
-const cv    = document.getElementById('cv');
-const ctx   = cv.getContext('2d', {willReadFrequently: true});
-const elStatus = document.getElementById('status');
-const elStats  = document.getElementById('stats');
-const elHttps  = document.getElementById('httpsWarn');
 
-// HTTPS tekshiruvi
-if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+const video   = document.getElementById('video');
+const cvLive  = document.getElementById('cvLive');
+const ctxLive = cvLive.getContext('2d');
+const cvDbg   = document.getElementById('cvDebug');
+const ctxDbg  = cvDbg.getContext('2d');
+const elStatus= document.getElementById('status');
+const elStats = document.getElementById('stats');
+const elHttps = document.getElementById('httpsWarn');
+
+if (location.protocol !== 'https:' && !['localhost','127.0.0.1'].includes(location.hostname))
   elHttps.style.display = 'block';
-}
 
-let stream = null, raf = null, running = false, lastSeq = -1;
-let audio = null; // AudioContext faqat foydalanuvchi bosganda yaratiladi
-let nextTime = 0;
-let decodedFrames = 0, goodFrames = 0;
-let lastFrameTime = 0;
-const FRAME_INTERVAL = 50; // ms — 20fps decode (60fps o'rniga)
+let stream=null, raf=null, running=false, audioCtx=null;
+let nextTime=0, lastSeq=-1, lastFrameTs=0;
+let decodedFrames=0, goodFrames=0, magicFails=0, crcFails=0;
+const FRAME_MS = 40; // 25fps decode
 
-function say(t) { elStatus.textContent = t; }
+function say(t){ elStatus.textContent=t; }
 
-function crc8(a) {
-  let c = 0;
-  for (const v of a) {
-    c ^= v;
-    for (let i = 0; i < 8; i++) c = (c & 128) ? ((c << 1) ^ 7) : (c << 1);
-    c &= 255;
-  }
+function crc8(a){
+  let c=0;
+  for(const v of a){c^=v;for(let i=0;i<8;i++)c=(c&128)?((c<<1)^7):c<<1;c&=255;}
   return c;
 }
 
-function readCell(img, gx, gy) {
-  const sx = Math.floor((gx + .5) * img.width / W);
-  const sy = Math.floor((gy + .5) * img.height / H);
-  let sum = 0, n = 0;
-  for (let y = Math.max(0, sy-2); y < Math.min(img.height, sy+3); y++) {
-    for (let xx = Math.max(0, sx-2); xx < Math.min(img.width, xx+3); xx++) {
-      const p = (y * img.width + xx) * 4;
-      sum += (img.data[p] + img.data[p+1] + img.data[p+2]) / 3;
-      n++;
-    }
+// === Adaptive threshold: Otsu yoki oddiy lokal o'rtacha ===
+function computeAdaptiveThreshold(data, w, h) {
+  // Butun kadr bo'yicha gistogramma asosida global threshold
+  let hist = new Int32Array(256);
+  for (let i=0; i<w*h; i++) {
+    const p = i*4;
+    hist[Math.round((data[p]+data[p+1]+data[p+2])/3)]++;
   }
-  return (n > 0 && sum/n > 128) ? 1 : 0;
+  // Otsu metodi
+  const total = w*h;
+  let sum=0;
+  for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0, wB=0, max=0, t=128;
+  for(let i=0;i<256;i++){
+    wB+=hist[i]; if(!wB) continue;
+    const wF=total-wB; if(!wF) break;
+    sumB+=i*hist[i];
+    const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>max){max=between;t=i;}
+  }
+  return t;
+}
+
+// === Bir katakni o'qish (lokal 5x5 o'rtacha) ===
+function readCell(data, imgW, imgH, gx, gy, thresh) {
+  const cx = Math.floor((gx+0.5)*imgW/W);
+  const cy = Math.floor((gy+0.5)*imgH/H);
+  const r  = Math.max(2, Math.floor(Math.min(imgW/W, imgH/H)/4));
+  let sum=0, n=0;
+  for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+    const px=cx+dx, py=cy+dy;
+    if(px<0||px>=imgW||py<0||py>=imgH) continue;
+    const p=(py*imgW+px)*4;
+    sum+=(data[p]+data[p+1]+data[p+2])/3;
+    n++;
+  }
+  return n>0 && sum/n > thresh ? 1 : 0;
 }
 
 function decode() {
   const now = performance.now();
-  // Throttle: har 50ms da bir marta decode
-  if (now - lastFrameTime < FRAME_INTERVAL) return;
-  lastFrameTime = now;
+  if (now - lastFrameTs < FRAME_MS) return;
+  lastFrameTs = now;
 
-  cv.width  = 400;
-  cv.height = Math.max(240, Math.round(400 * (video.videoHeight / video.videoWidth || 0.75)));
-  ctx.drawImage(video, 0, 0, cv.width, cv.height);
-  const img = ctx.getImageData(0, 0, cv.width, cv.height);
+  const IW=400, IH=300;
+  cvLive.width=IW; cvLive.height=IH;
+  ctxLive.drawImage(video, 0, 0, IW, IH);
+  const img = ctxLive.getImageData(0, 0, IW, IH);
+
+  // Adaptive threshold hisoblash
+  const thresh = computeAdaptiveThreshold(img.data, IW, IH);
+
+  // Debug canvas tayyorla
+  cvDbg.width=IW; cvDbg.height=IH;
+  ctxDbg.drawImage(video, 0, 0, IW, IH);
 
   const packet = new Uint8Array(BYTES);
-  let k = 0;
-  for (let gy = 1; gy < H-1 && k < BYTES*8; gy++) {
-    for (let gx = 1; gx < W-1 && k < BYTES*8; gx++) {
-      packet[k>>3] |= readCell(img, gx, gy) << (7-(k&7));
+  let k=0;
+
+  for(let gy=1; gy<H-1; gy++) {
+    for(let gx=1; gx<W-1; gx++) {
+      if(k>=BYTES*8) break;
+      const bit = readCell(img.data, IW, IH, gx, gy, thresh);
+      packet[k>>3] |= bit << (7-(k&7));
+
+      // Debug: katakni rangli chizish
+      const cx = Math.floor((gx+0.5)*IW/W);
+      const cy = Math.floor((gy+0.5)*IH/H);
+      const cw = Math.floor(IW/W)-1;
+      const ch = Math.floor(IH/H)-1;
+      ctxDbg.fillStyle = bit ? 'rgba(0,255,80,0.35)' : 'rgba(255,50,50,0.25)';
+      ctxDbg.fillRect(cx-cw/2, cy-ch/2, cw, ch);
       k++;
     }
   }
 
+  // Chegara kataklar (ko'k)
+  ctxDbg.strokeStyle='rgba(80,160,255,0.7)';
+  ctxDbg.lineWidth=1;
+  ctxDbg.strokeRect(0,0, Math.floor(IW/W)*1, IH);
+  ctxDbg.strokeRect(IW-Math.floor(IW/W),0, Math.floor(IW/W), IH);
+
   decodedFrames++;
 
-  // Magic bytes tekshiruvi
-  if (packet[0] !== 0xA5 || packet[1] !== 0x5A) return;
-  // CRC tekshiruvi
-  if (crc8(packet.slice(0, BYTES-1)) !== packet[BYTES-1]) return;
+  // Magic bytes
+  if(packet[0]!==0xA5 || packet[1]!==0x5A){ magicFails++; updateStats(thresh,'❌ Magic'); return; }
+  // CRC
+  if(crc8(packet.slice(0,BYTES-1)) !== packet[BYTES-1]){ crcFails++; updateStats(thresh,'❌ CRC'); return; }
 
-  const seq = packet[2] | (packet[3] << 8);
-
-  // Sequence gap — eski qiymatni tiklash
-  if (lastSeq >= 0) {
-    const gap = (seq - lastSeq + 65536) & 65535;
-    if (gap > 2000) { lastSeq = seq; return; } // juda katta sakrash — sinxron yo'qolgan
+  const seq = packet[2]|(packet[3]<<8);
+  if(lastSeq>=0){
+    const gap=(seq-lastSeq+65536)&65535;
+    if(gap>2000){ lastSeq=seq; updateStats(thresh,'⚠️ Gap'); return; }
   }
-  lastSeq = seq;
+  lastSeq=seq;
   goodFrames++;
-  elStats.textContent = `Qabul qilingan: ${goodFrames} | Urinish: ${decodedFrames} | SNR: ${(goodFrames/decodedFrames*100).toFixed(0)}%`;
+  updateStats(thresh, '✅ OK');
 
-  const pcm = new Float32Array(PAYLOAD);
-  for (let i = 0; i < PAYLOAD; i++) pcm[i] = (packet[i+4] / 127.5) - 1;
-  playChunk(pcm, 8000);
+  const pcm=new Float32Array(PAYLOAD);
+  for(let i=0;i<PAYLOAD;i++) pcm[i]=(packet[i+4]/127.5)-1;
+  playChunk(pcm,8000);
+}
+
+function updateStats(thresh, last) {
+  elStats.textContent =
+    `Threshold: ${thresh} | OK: ${goodFrames} | Magic xato: ${magicFails} | CRC xato: ${crcFails} | So'nggi: ${last}`;
 }
 
 function playChunk(samples, sr) {
-  if (!audio) return;
-  const b = audio.createBuffer(1, samples.length, sr);
-  b.copyToChannel(samples, 0);
-  const s = audio.createBufferSource();
-  s.buffer = b;
-  s.connect(audio.destination);
-  if (nextTime < audio.currentTime + 0.03) nextTime = audio.currentTime + 0.03;
+  if(!audioCtx) return;
+  const b=audioCtx.createBuffer(1,samples.length,sr);
+  b.copyToChannel(samples,0);
+  const s=audioCtx.createBufferSource();
+  s.buffer=b; s.connect(audioCtx.destination);
+  if(nextTime < audioCtx.currentTime+0.03) nextTime=audioCtx.currentTime+0.05;
   s.start(nextTime);
-  nextTime += b.duration;
+  nextTime+=b.duration;
 }
 
-function loop() {
-  if (!running) return;
-  decode();
-  raf = requestAnimationFrame(loop);
-}
+function loop(){ if(!running) return; decode(); raf=requestAnimationFrame(loop); }
 
 document.getElementById('btnStart').onclick = async () => {
-  // AudioContext foydalanuvchi gesturasi ichida yaratiladi
-  if (!audio) {
-    audio = new (window.AudioContext || window.webkitAudioContext)();
-  }
-
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
   try {
-    // Avval kamera ruxsatini so'rash
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width:  { ideal: 1280 },
-        height: { ideal: 720 }
-      },
-      audio: false
+      video:{ facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} },
+      audio:false
     });
-    video.srcObject = stream;
+    video.srcObject=stream;
     await video.play();
-    await audio.resume();
-
-    running = true;
-    decodedFrames = 0;
-    goodFrames = 0;
-    lastSeq = -1;
-    nextTime = audio.currentTime + 0.1;
-    say('🟢 JONLI — kamera oqimni o\u02BCqimoqda');
+    await audioCtx.resume();
+    running=true; decodedFrames=0; goodFrames=0; magicFails=0; crcFails=0;
+    lastSeq=-1; nextTime=audioCtx.currentTime+0.1;
+    say('🟢 JONLI — transmitter ekraniga qarating');
     loop();
   } catch(e) {
-    // Xato turini aniqlab ko'rsatish
-    let msg = 'Kamera xatosi: ';
-    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-      msg = '❌ Kamera ruxsati rad etildi. Brauzer sozlamalaridan ruxsat bering va sahifani yangilang.';
-    } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
-      msg = '❌ Kamera topilmadi. Qurilmada kamera mavjudligini tekshiring.';
-    } else if (e.name === 'NotReadableError') {
-      msg = '❌ Kamera boshqa dastur tomonidan band. Boshqa ilovalarni yoping.';
-    } else if (e.name === 'OverconstrainedError') {
-      msg = '❌ Kamera so\u02BCralgan sifatni qo\u02BCllab-quvvatlamaydi. Qurilmani tekshiring.';
-    } else {
-      msg += e.message;
-    }
-    say(msg);
+    const msgs={
+      NotAllowedError:'❌ Kamera ruxsati rad etildi. Brauzer sozlamalaridan ruxsat bering.',
+      PermissionDeniedError:'❌ Kamera ruxsati rad etildi.',
+      NotFoundError:'❌ Kamera topilmadi.',
+      DevicesNotFoundError:'❌ Kamera topilmadi.',
+      NotReadableError:'❌ Kamera boshqa dastur tomonidan band.',
+      OverconstrainedError:'❌ Kamera sifati qo\u02BCllab-quvvatlanmaydi.'
+    };
+    say(msgs[e.name]||('Xato: '+e.message));
   }
 };
 
-document.getElementById('btnStop').onclick = () => {
-  running = false;
-  cancelAnimationFrame(raf);
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  say('To\u02BCxtatildi');
-  elStats.textContent = '';
+document.getElementById('btnStop').onclick = ()=>{
+  running=false; cancelAnimationFrame(raf);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  say('To\u02BCxtatildi'); elStats.textContent='';
 };
 </script>
 </body>
-  </html>
-
+</html>
