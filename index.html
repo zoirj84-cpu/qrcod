@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Optical RX</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060d06;color:#c8e8c8;font-family:system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{width:100%;padding:14px 20px;border-bottom:1px solid #1a2e1a;display:flex;align-items:center;gap:10px}
+.dot{width:9px;height:9px;border-radius:50%;background:#2a4a2a;transition:all .3s;flex-shrink:0}
+.dot.live{background:#22dd66;box-shadow:0 0 10px #22dd66;animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+h1{font-size:14px;font-weight:600;letter-spacing:.05em}
+.badge{margin-left:auto;font-size:11px;color:#3a6a3a;background:#0e1e0e;padding:3px 9px;border-radius:4px;border:1px solid #1e3e1e;font-family:monospace}
+.hwarn{display:none;width:100%;padding:9px 18px;background:#1e1608;border-bottom:1px solid #4a3800;font-size:12px;color:#cc9922;text-align:center}
+.hwarn.show{display:block}
+main{width:100%;max-width:900px;padding:18px 16px 32px;display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font-size:14px;font-weight:600;padding:9px 18px;border-radius:7px;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;transition:opacity .15s}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn-start{background:#22dd66;color:#030a03}
+.btn-start:hover:not(:disabled){opacity:.85}
+.btn-stop{background:#1a0808;color:#ee4444;border:1px solid #3a1414}
+.btn-stop:hover:not(:disabled){background:#220e0e}
+.cvrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cvcard{border:1px solid #1a2e1a;border-radius:9px;overflow:hidden;background:#000;display:flex;flex-direction:column}
+.cvcard canvas{width:100%;aspect-ratio:4/3;display:block}
+.cvlbl{padding:5px 10px;font-size:10px;color:#2a5a2a;background:#0b1a0b;border-top:1px solid #1a2e1a;font-family:monospace}
+.panel{background:#0b1a0b;border:1px solid #1a2e1a;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.srow{display:flex;align-items:center;gap:8px;font-size:13px}
+.sdot{width:7px;height:7px;border-radius:50%;background:#2a4a2a;flex-shrink:0;transition:all .3s}
+.sdot.ok{background:#22dd66;box-shadow:0 0 6px #22dd66}
+.sdot.warn{background:#ddaa22}
+.sdot.err{background:#ee4444}
+#stxt{color:#4a8a4a}
+.sgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.scard{background:#0e200e;border:1px solid #1a2e1a;border-radius:7px;padding:10px 12px}
+.sval{font-family:monospace;font-size:17px;font-weight:700;line-height:1;margin-bottom:3px}
+.sval.g{color:#22dd66}.sval.a{color:#ddaa22}.sval.r{color:#ee4444}.sval.d{color:#3a6a3a}
+.slbl{font-size:10px;color:#2e5a2e}
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.meter{background:#0e200e;border:1px solid #1a2e1a;border-radius:7px;padding:10px 14px}
+.mlbl{font-size:10px;color:#2e5a2e;margin-bottom:5px;font-family:monospace}
+.mbar{height:4px;background:#1a2e1a;border-radius:2px;overflow:hidden}
+.mfill{height:100%;border-radius:2px;transition:width .15s}
+.mfill.g{background:#22dd66}.mfill.a{background:#ddaa22}.mfill.r{background:#ee4444}
+.mval{font-family:monospace;font-size:11px;color:#4a8a4a;margin-top:4px}
+.wavewrap{background:#0e200e;border:1px solid #1a2e1a;border-radius:7px;overflow:hidden;height:52px}
+.wavewrap canvas{width:100%;height:100%;display:block}
+.sgr{display:flex;gap:3px;height:4px;margin-top:6px}
+.sg{flex:1;border-radius:1px;background:#1a2e1a;transition:background .1s}
+.sg.on{background:#22dd66}.sg.on.a{background:#ddaa22}.sg.on.r{background:#ee4444}
+.tip{font-size:11px;color:#2a4a2a;text-align:center}
+.debuginfo{font-size:10px;color:#2a5a2a;font-family:monospace;background:#080e08;border:1px solid #142014;border-radius:5px;padding:6px 10px;line-height:1.7}
+video{display:none}
+@media(max-width:580px){.cvrow{grid-template-columns:1fr}.sgrid{grid-template-columns:repeat(3,1fr)}.meters{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="hdot"></div>
+  <h1>Optical RX</h1>
+  <span class="badge" id="hbadge">tayyor</span>
+</header>
+<div class="hwarn" id="hwarn">⚠ Kamera faqat <b>HTTPS</b> yoki <b>localhost</b> da ishlaydi</div>
+<main>
+  <div class="row">
+    <button class="btn btn-start" id="bstart">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+      Boshlash
+    </button>
+    <button class="btn btn-stop" id="bstop" disabled>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      To'xtat
+    </button>
+  </div>
+
+  <div class="cvrow">
+    <div class="cvcard">
+      <canvas id="cvlive" width="400" height="300"></canvas>
+      <div class="cvlbl">kamera · jonli</div>
+    </div>
+    <div class="cvcard">
+      <canvas id="cvdbg" width="400" height="300"></canvas>
+      <div class="cvlbl">grid decode · yashil=1 · qizil=0</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="srow"><div class="sdot" id="sdot"></div><span id="stxt">Transmitter ekraniga kamerani qarating</span></div>
+    <div class="debuginfo" id="dinfo">threshold: — · sinxron: — · signal: —</div>
+  </div>
+
+  <div class="sgrid">
+    <div class="scard"><div class="sval g" id="sok">0</div><div class="slbl">muvaffaqiyat</div></div>
+    <div class="scard"><div class="sval a" id="smag">0</div><div class="slbl">magic xato</div></div>
+    <div class="scard"><div class="sval a" id="scrc">0</div><div class="slbl">crc xato</div></div>
+    <div class="scard"><div class="sval d" id="stot">0</div><div class="slbl">jami kadrlar</div></div>
+    <div class="scard"><div class="sval d" id="srate">—</div><div class="slbl">sifat %</div></div>
+  </div>
+
+  <div class="meters">
+    <div class="meter">
+      <div class="mlbl">Otsu threshold (0–255)</div>
+      <div class="mbar"><div class="mfill g" id="mthresh" style="width:50%"></div></div>
+      <div class="mval" id="mthreshv">—</div>
+      <div class="sgr" id="sgr"></div>
+    </div>
+    <div class="meter">
+      <div class="mlbl">Sinxron chegara aniqligi</div>
+      <div class="mbar"><div class="mfill g" id="msync" style="width:0%"></div></div>
+      <div class="mval" id="msyncv">—</div>
+    </div>
+  </div>
+
+  <div class="wavewrap"><canvas id="wvcv" width="800" height="52"></canvas></div>
+
+  <div class="tip">Ekranga 20–40 sm masofada, to'g'ri burchak · Kamera avtofokusi o'chiq bo'lsa yaxshi</div>
+</main>
+<video id="vid" autoplay muted playsinline></video>
+
+<script>
+/* =====================================================
+   PROTOKOL (transmitter bilan to'liq mos)
+   GW=32, GH=20, CW=800/32=25, CH=500/20=25
+   Sinxron chegara: alternating (gy=0,GH-1 qatorlar, gx=0,GW-1 ustunlar)
+   4 burchak marker: TL=oq2×2, TR=qora2×2, BL=qora2×2, BR=oq2×2
+   Data: gy=1..GH-2, gx=1..GW-2 → 30×18=540 bit = 67 bayt
+   Paket: 62 bayt → 496 bit ≤ 540
+   Audio: µ-law 8bit, 1140Hz
+===================================================== */
+const GW=32,GH=20;
+const TOTAL=62, PAYLOAD=57, SRATE=1140;
+const DECODE_MS=50; // 20fps
+
+// Grid hisoblash: receiver kamera hajmida
+const IW=400,IH=300;
+const CW_R=IW/GW, CH_R=IH/GH; // katak o'lchami receiver canvas da
+
+if(location.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(location.hostname))
+  document.getElementById('hwarn').classList.add('show');
+
+// SNR segmentlari
+const sgr=document.getElementById('sgr');
+for(let i=0;i<20;i++){const d=document.createElement('div');d.className='sg';sgr.appendChild(d);}
+
+const vid=document.getElementById('vid');
+const cvl=document.getElementById('cvlive'),ctl=cvl.getContext('2d');
+const cvd=document.getElementById('cvdbg'),ctd=cvd.getContext('2d');
+const wvcv=document.getElementById('wvcv'),wvx=wvcv.getContext('2d');
+const hdot=document.getElementById('hdot'),hbadge=document.getElementById('hbadge');
+const sdot=document.getElementById('sdot'),stxt=document.getElementById('stxt');
+const dinfo=document.getElementById('dinfo');
+
+let stream=null,raf=null,running=false,audioCtx=null;
+let nextTime=0,lastSeq=-1,lastDecodeT=0;
+let nOk=0,nMag=0,nCrc=0,nTot=0;
+const WBUF=800; const wbuf=new Float32Array(WBUF); let wpos=0;
+
+// µ-law decode
+function muLawDecode(u){
+  const sign=(u&128)?-1:1;
+  u=~u&0x7F;
+  const step=(1<<((u>>4)+1));
+  return sign*(step+(u&0x0F)*2*step/32-1)/128;
+}
+
+// CRC-8
+function crc8(arr){
+  let c=0;
+  for(const v of arr){c^=v;for(let i=0;i<8;i++)c=(c&128)?((c<<1)^7):(c<<1);c&=255;}
+  return c;
+}
+
+// Otsu global threshold
+function otsu(data,n){
+  const h=new Int32Array(256);
+  for(let i=0;i<n;i++)h[Math.round((data[i*4]+data[i*4+1]+data[i*4+2])/3)]++;
+  let sum=0;for(let i=0;i<256;i++)sum+=i*h[i];
+  let sb=0,wb=0,best=0,t=128;
+  for(let i=0;i<256;i++){
+    wb+=h[i];if(!wb)continue;
+    const wf=n-wb;if(!wf)break;
+    sb+=i*h[i];
+    const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);
+    if(v>best){best=v;t=i;}
+  }
+  return t;
+}
+
+// Bir katakni o'qish: markaziy piksel + kichik maydonu o'rtacha luma
+function readCell(data,imgW,imgH,gx,gy,thresh){
+  const cx=Math.floor((gx+0.5)*imgW/GW);
+  const cy=Math.floor((gy+0.5)*imgH/GH);
+  // Katak markazida 3×3 piksel o'rtacha
+  const r=Math.max(2,Math.floor(Math.min(imgW/GW,imgH/GH)*0.35));
+  let s=0,n=0;
+  for(let dy=-r;dy<=r;dy++){
+    for(let dx=-r;dx<=r;dx++){
+      const px=cx+dx,py=cy+dy;
+      if(px<0||px>=imgW||py<0||py>=imgH)continue;
+      const p=(py*imgW+px)*4;
+      s+=(data[p]+data[p+1]+data[p+2])/3;n++;
+    }
+  }
+  return n>0&&s/n>thresh?1:0;
+}
+
+/* Sinxron chegara tekshirish:
+   Yuqori qator (gy=0): gx chutti → oq, toq → qora
+   Quyi qator (gy=GH-1): teskari
+   Bu naqsh TX da fixed → RX bu naqshni taqqoslab signal borligini biladi
+*/
+function checkSync(data,thresh){
+  let match=0,total=0;
+  for(let gx=2;gx<GW-2;gx++){
+    const expected=(gx%2===0)?1:0;
+    const got=readCell(data,IW,IH,gx,0,thresh);
+    if(got===expected)match++;total++;
+    const gotB=readCell(data,IW,IH,gx,GH-1,thresh);
+    const expB=(gx%2===0)?0:1;
+    if(gotB===expB)match++;total++;
+  }
+  return match/total; // 0..1
+}
+
+function say(t,type=''){
+  stxt.textContent=t;
+  sdot.className='sdot'+(type?' '+type:'');
+}
+
+function drawWave(){
+  wvx.fillStyle='#080e08';wvx.fillRect(0,0,800,52);
+  wvx.strokeStyle='#22dd66';wvx.lineWidth=1;
+  wvx.beginPath();
+  for(let i=0;i<WBUF;i++){
+    const x=i/WBUF*800;
+    const y=(0.5-wbuf[(wpos+i)%WBUF]*0.44)*52;
+    i?wvx.lineTo(x,y):wvx.moveTo(x,y);
+  }
+  wvx.stroke();
+}
+
+function updateMeters(thresh,syncQ,rate){
+  // Threshold bar
+  const tf=document.getElementById('mthresh');
+  const pct=thresh/255*100;
+  tf.style.width=pct+'%';
+  tf.className='mfill '+(pct>70||pct<20?'r':pct>55||pct<30?'a':'g');
+  document.getElementById('mthreshv').textContent=`${thresh} / 255`;
+
+  // Sync bar
+  const sf=document.getElementById('msync');
+  sf.style.width=(syncQ*100).toFixed(0)+'%';
+  sf.className='mfill '+(syncQ<0.6?'r':syncQ<0.8?'a':'g');
+  document.getElementById('msyncv').textContent=(syncQ*100).toFixed(0)+'%';
+
+  // SNR segmentlari
+  const segs=sgr.querySelectorAll('.sg');
+  const filled=Math.round(rate/100*segs.length);
+  segs.forEach((s,i)=>{
+    if(i<filled)s.className='sg on'+(filled<7?' r':filled<13?' a':'');
+    else s.className='sg';
+  });
+
+  // Stats
+  document.getElementById('sok').textContent=nOk;
+  document.getElementById('smag').textContent=nMag;
+  document.getElementById('scrc').textContent=nCrc;
+  document.getElementById('stot').textContent=nTot;
+  const rc=document.getElementById('srate');
+  rc.textContent=rate+'%';
+  rc.className='sval '+(rate>60?'g':rate>30?'a':nTot>5?'r':'d');
+}
+
+function decode(){
+  const now=performance.now();
+  if(now-lastDecodeT<DECODE_MS)return;
+  lastDecodeT=now;
+
+  // Kamera kadrini canvas ga chiz
+  cvl.width=IW;cvl.height=IH;
+  ctl.drawImage(vid,0,0,IW,IH);
+  const img=ctl.getImageData(0,0,IW,IH);
+  const data=img.data;
+
+  const thresh=otsu(data,IW*IH);
+  const syncQ=checkSync(data,thresh);
+
+  // Debug canvas
+  cvd.width=IW;cvd.height=IH;
+  ctd.drawImage(vid,0,0,IW,IH);
+
+  const pkt=new Uint8Array(TOTAL);
+  let k=0;
+
+  for(let gy=1;gy<GH-1;gy++){
+    for(let gx=1;gx<GW-1;gx++){
+      if(k>=TOTAL*8)break;
+      const bit=readCell(data,IW,IH,gx,gy,thresh);
+      pkt[k>>3]|=bit<<(7-(k&7));
+
+      // Debug overlay
+      const dcx=Math.floor((gx+0.5)*IW/GW);
+      const dcy=Math.floor((gy+0.5)*IH/GH);
+      const dw=Math.floor(IW/GW)-2,dh=Math.floor(IH/GH)-2;
+      ctd.fillStyle=bit?'rgba(34,221,102,0.35)':'rgba(238,68,68,0.22)';
+      ctd.fillRect(dcx-dw/2,dcy-dh/2,dw,dh);
+      k++;
+    }
+  }
+
+  // Chegara ko'k chiziq
+  ctd.strokeStyle='rgba(80,160,255,0.6)';ctd.lineWidth=1;
+  ctd.strokeRect(0,0,Math.ceil(IW/GW),IH);
+  ctd.strokeRect(IW-Math.ceil(IW/GW),0,Math.ceil(IW/GW),IH);
+  ctd.strokeRect(0,0,IW,Math.ceil(IH/GH));
+  ctd.strokeRect(0,IH-Math.ceil(IH/GH),IW,Math.ceil(IH/GH));
+
+  nTot++;
+  const rate=nTot>0?Math.round(nOk/nTot*100):0;
+
+  dinfo.textContent=`threshold: ${thresh} · sinxron: ${(syncQ*100).toFixed(0)}% · kadrlar: ${nTot} · sifat: ${rate}%`;
+
+  // Sinxron signal yetarli emasligi
+  if(syncQ<0.55){
+    nMag++;
+    updateMeters(thresh,syncQ,rate);
+    say(`⚠ Sinxron topilmadi (${(syncQ*100).toFixed(0)}%) — ekranga yaqinlashtiring`,'warn');
+    return;
+  }
+
+  // Magic bytes tekshirish
+  if(pkt[0]!==0xA5||pkt[1]!==0x5A){
+    nMag++;
+    updateMeters(thresh,syncQ,rate);
+    say('❌ Magic xato — ekran to\'g\'ri tushayaptimi?','warn');
+    return;
+  }
+
+  // CRC tekshirish
+  if(crc8(pkt.subarray(0,TOTAL-1))!==pkt[TOTAL-1]){
+    nCrc++;
+    updateMeters(thresh,syncQ,rate);
+    say('❌ CRC xato — kamera silliq ushlab turing','warn');
+    return;
+  }
+
+  const seq=pkt[2]|(pkt[3]<<8);
+  if(lastSeq>=0){
+    const gap=(seq-lastSeq+65536)&65535;
+    if(gap>1000){lastSeq=seq;updateMeters(thresh,syncQ,rate);say('⚠ Uzilish aniqlandii','warn');return;}
+  }
+  lastSeq=seq;nOk++;
+
+  // µ-law decode + play
+  const pcm=new Float32Array(PAYLOAD);
+  for(let i=0;i<PAYLOAD;i++){
+    pcm[i]=muLawDecode(pkt[i+4]);
+    wbuf[wpos]=pcm[i];wpos=(wpos+1)%WBUF;
+  }
+  playChunk(pcm);
+  drawWave();
+
+  updateMeters(thresh,syncQ,Math.round(nOk/nTot*100));
+  say(`✅ Oqilmoqda · seq:${seq} · sinxron:${(syncQ*100).toFixed(0)}%`,'ok');
+}
+
+function playChunk(pcm){
+  if(!audioCtx)return;
+  const b=audioCtx.createBuffer(1,pcm.length,SRATE);
+  b.copyToChannel(pcm,0);
+  const s=audioCtx.createBufferSource();
+  s.buffer=b;s.connect(audioCtx.destination);
+  const now=audioCtx.currentTime;
+  if(nextTime<now-0.15)nextTime=now+0.08;
+  if(nextTime<now+0.03)nextTime=now+0.08;
+  s.start(nextTime);
+  nextTime+=b.duration;
+}
+
+function loop(){if(!running)return;decode();raf=requestAnimationFrame(loop);}
+
+document.getElementById('bstart').onclick=async()=>{
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
+      audio:false
+    });
+    vid.srcObject=stream;await vid.play();await audioCtx.resume();
+    running=true;nOk=0;nMag=0;nCrc=0;nTot=0;lastSeq=-1;
+    nextTime=audioCtx.currentTime+0.1;lastDecodeT=0;
+    document.getElementById('bstart').disabled=true;
+    document.getElementById('bstop').disabled=false;
+    hdot.className='dot live';hbadge.textContent='JONLI';
+    say('🟢 Kamera ishga tushdi — transmitter ekraniga qarating','ok');
+    loop();
+  }catch(e){
+    const m={
+      NotAllowedError:'❌ Kamera ruxsati rad etildi — sozlamalardan ruxsat bering',
+      NotFoundError:'❌ Kamera topilmadi',
+      NotReadableError:'❌ Kamera boshqa dastur tomonidan band',
+    };
+    say(m[e.name]||'❌ Xato: '+e.message,'err');
+  }
+};
+
+document.getElementById('bstop').onclick=()=>{
+  running=false;cancelAnimationFrame(raf);
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  hdot.className='dot';hbadge.textContent='tayyor';
+  document.getElementById('bstart').disabled=false;
+  document.getElementById('bstop').disabled=true;
+  say('To\'xtatildi');wbuf.fill(0);drawWave();
+};
+</script>
+</body>
+</html>
